@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Lockpicking - Nightmare Edition</title>
+    <style>
+        :root {
+            --bg: #050505;
+            --gold: #8a6d3b;
+            --danger: #800000;
+        }
+
+        body {
+            background-color: var(--bg);
+            color: #777;
+            font-family: 'Courier New', monospace;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            overflow: hidden;
+            touch-action: none;
+        }
+
+        #ui-layer {
+            position: absolute;
+            top: 20px;
+            text-align: center;
+            width: 100%;
+        }
+
+        .pick-container {
+            display: flex;
+            justify-content: center;
+            gap: 5px;
+            margin-top: 10px;
+        }
+
+        .pick-mini {
+            width: 4px;
+            height: 20px;
+            background: #333;
+            border: 1px solid #000;
+        }
+
+        .broken { background: transparent; border: 1px solid var(--danger); opacity: 0.3; }
+
+        #lock-area {
+            position: relative;
+            width: 320px;
+            height: 320px;
+        }
+
+        #outer-ring {
+            width: 100%;
+            height: 100%;
+            background: radial-gradient(circle, #222, #000);
+            border: 12px solid #111;
+            border-radius: 50%;
+            box-shadow: inset 0 0 20px #000;
+        }
+
+        #inner-cylinder {
+            width: 35%;
+            height: 35%;
+            background: linear-gradient(145deg, #444, #111);
+            border: 2px solid #000;
+            border-radius: 50%;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%) rotate(0deg);
+        }
+
+        #key-way {
+            width: 8%;
+            height: 45%;
+            background: #000;
+            position: absolute;
+            top: 27.5%;
+            left: 46%;
+        }
+
+        #pick-tool {
+            position: absolute;
+            width: 2px;
+            height: 50%;
+            background: #555;
+            bottom: 50%;
+            left: calc(50% - 1px);
+            transform-origin: bottom center;
+            pointer-events: none;
+            z-index: 5;
+        }
+
+        #btn-rotate {
+            display: none;
+            margin-top: 50px;
+            padding: 15px 40px;
+            background: transparent;
+            color: var(--gold);
+            border: 1px solid var(--gold);
+            cursor: pointer;
+            text-transform: uppercase;
+            letter-spacing: 3px;
+        }
+
+        @media (pointer: coarse) { #btn-rotate { display: block; } }
+
+        .modal {
+            display: none;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: #000;
+            border: 1px solid var(--gold);
+            padding: 40px;
+            text-align: center;
+            z-index: 100;
+            width: 70%;
+        }
+
+        .coords { color: var(--gold); font-size: 1.2em; margin: 20px 0; letter-spacing: 1px; }
+
+        .shaking { animation: vibrate 0.05s infinite; }
+        @keyframes vibrate {
+            0% { transform: translate(-50%, -50%) rotate(var(--r)); left: 50.5%; }
+            100% { transform: translate(-50%, -50%) rotate(var(--r)); left: 49.5%; }
+        }
+    </style>
+</head>
+<body>
+
+    <div id="ui-layer">
+        <div style="font-size: 0.7em; letter-spacing: 2px;">WERKZEUG-STATUS</div>
+        <div class="pick-container" id="picks-icons">
+            <div class="pick-mini"></div><div class="pick-mini"></div><div class="pick-mini"></div><div class="pick-mini"></div><div class="pick-mini"></div>
+        </div>
+    </div>
+
+    <div id="lock-area">
+        <div id="outer-ring">
+            <div id="inner-cylinder">
+                <div id="key-way"></div>
+            </div>
+        </div>
+        <div id="pick-tool"></div>
+
+        <div id="win" class="modal">
+            <h2 style="color:var(--gold)">ZUGRIFF GEWÄHRT</h2>
+            <div class="coords">N 52° 32.906′<br>E 13° 02.140′</div>
+            <button onclick="location.reload()" style="background:none; color:#555; border:none; cursor:pointer;">[SYSTEM REBOOT]</button>
+        </div>
+
+        <div id="lost" class="modal">
+            <h2 style="color:var(--danger)">SYSTEM SPERRE</h2>
+            <p style="font-size: 0.8em;">Keine Dietriche mehr verfügbar.</p>
+            <button onclick="location.reload()" style="background:none; color:#555; border:none; cursor:pointer;">[RETRY]</button>
+        </div>
+    </div>
+
+    <button id="btn-rotate">DREHEN</button>
+
+    <script>
+        const pick = document.getElementById('pick-tool');
+        const cylinder = document.getElementById('inner-cylinder');
+        const area = document.getElementById('lock-area');
+        const btn = document.getElementById('btn-rotate');
+        const pickIcons = document.getElementById('picks-icons').children;
+
+        let lives = 5;
+        let health = 100;
+        let isDone = false;
+        let pressing = false;
+        let rot = 0;
+        let pAngle = 0;
+        let tremor = 0;
+
+        // ALBTRAUM: Extrem enger Sweetspot
+        const target = Math.floor(Math.random() * 150) - 75;
+
+        let ctx;
+        const snd = (f, d, v) => { if(!ctx) return; let o=ctx.createOscillator(), g=ctx.createGain(); o.type='square'; o.frequency.value=f; g.gain.value=v; o.connect(g); g.connect(ctx.destination); o.start(); o.stop(ctx.currentTime+d); };
+
+        function update(x, y) {
+            if (isDone || pressing) return;
+            if(!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)();
+            const b = area.getBoundingClientRect();
+            const a = Math.atan2(y - (b.top + b.height/2), x - (b.left + b.width/2)) * (180/Math.PI) + 90;
+            pAngle = Math.max(-90, Math.min(90, a));
+            // Leichter Tremor-Effekt
+            tremor = (Math.random() - 0.5) * 0.8;
+            pick.style.transform = `rotate(${pAngle + tremor}deg)`;
+        }
+
+        window.addEventListener('mousemove', (e) => update(e.clientX, e.clientY));
+        window.addEventListener('touchmove', (e) => { e.preventDefault(); update(e.touches[0].clientX, e.touches[0].clientY); }, {passive:false});
+
+        const start = () => { if(!isDone && lives > 0) { pressing = true; } };
+        const end = () => { pressing = false; if(!isDone) { rot = 0; cylinder.style.transform = `translate(-50%, -50%) rotate(0deg)`; cylinder.classList.remove('shaking'); } };
+
+        window.addEventListener('keydown', (e) => { if(e.code === 'Space') start(); });
+        window.addEventListener('keyup', (e) => { if(e.code === 'Space') end(); });
+        btn.addEventListener('touchstart', (e) => { e.preventDefault(); start(); });
+        btn.addEventListener('touchend', end);
+
+        function tick() {
+            if (isDone || lives <= 0) return;
+
+            if (pressing) {
+                const diff = Math.abs(pAngle - target);
+                // Nur 1.2 Grad Toleranz
+                let limit = (diff <= 1.2) ? 90 : Math.max(1, 90 - (diff * 8));
+
+                if (rot < limit) {
+                    rot += 1.2;
+                    let display = Math.min(rot, 90);
+                    cylinder.style.setProperty('--r', display + 'deg');
+                    cylinder.style.transform = `translate(-50%, -50%) rotate(${display}deg)`;
+                    if (rot >= 90) {
+                        isDone = true;
+                        snd(400, 0.1, 0.05);
+                        setTimeout(() => snd(600, 0.2, 0.05), 100);
+                        document.getElementById('win').style.display = 'block';
+                    }
+                } else {
+                    cylinder.classList.add('shaking');
+                    snd(100 + Math.random()*50, 0.05, 0.02);
+                    health -= 2.5; // Schneller Bruch
+                    if (health <= 0) {
+                        lives--;
+                        end();
+                        health = 100;
+                        if(pickIcons[lives]) pickIcons[lives].classList.add('broken');
+                        if(lives <= 0) document.getElementById('lost').style.display = 'block';
+                    }
+                }
+            }
+            requestAnimationFrame(tick);
+        }
+        tick();
+    </script>
+</body>
+</html>
